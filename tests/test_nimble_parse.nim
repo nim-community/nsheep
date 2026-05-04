@@ -18,21 +18,6 @@ license = "MIT"
     check result["description"] == "A great package"
     check result["license"] == "MIT"
 
-  test "extracts fields without equals sign":
-    let content = """
-name "mypackage"
-version "2.0.0"
-author "Jane Doe"
-description "Another package"
-license "BSD"
-"""
-    let result = parseNimbleSimple(content)
-    check result["name"] == "mypackage"
-    check result["version"] == "2.0.0"
-    check result["author"] == "Jane Doe"
-    check result["description"] == "Another package"
-    check result["license"] == "BSD"
-
   test "handles mixed spacing and tabs":
     let content = "name\t=\t\"mypackage\"\n  version   =   \"3.0.0\"\nauthor= \"John\""
     let result = parseNimbleSimple(content)
@@ -83,10 +68,20 @@ version = "1.0.0"
     check not result.hasKey("name")
     check result["version"] == "1.0.0"
 
-  test "stops at first matching field per line":
+  test "does not support deprecated call-style metadata":
     let content = """
-name = "mypackage" version = "ignored"
+name "mypackage"
+version "2.0.0"
 """
     let result = parseNimbleSimple(content)
-    check result["name"] == "mypackage"
+    check not result.hasKey("name")
     check not result.hasKey("version")
+
+  test "extracts backend and detects bin assignment":
+    let content = """
+backend = "cpp"
+bin = @["tool"]
+"""
+    let result = parseNimbleSimple(content)
+    check result["backend"] == "cpp"
+    check result["hasBin"] == "true"

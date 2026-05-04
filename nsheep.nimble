@@ -16,18 +16,11 @@ requires "chronicles >= 0.10.0"
 requires "yaml >= 2.0.0"
 requires "tiny_sqlite >= 0.2.0"
 requires "zippy >= 0.10.0"
+requires "https://github.com/elcritch/atlas#package-cache-tweaks"
 
-task frontend, "Build frontend assets":
-  exec "nimble install karax -y"
-  exec "mkdir -p public"
-  exec "nim js -d:release -o:public/app.js frontend/app.nim"
-  exec "cp frontend/index.html public/"
-  exec "cp frontend/app.css public/"
-  exec "cp frontend/robot.svg public/"
-  exec "cp frontend/theme.js public/"
+feature "frontend":
+  requires "karax"
 
-task test, "Run tests":
-  exec "nim c -r tests/test_tags.nim"
-  exec "nim c -r tests/test_nimble_parse.nim"
-  exec "nim c -r tests/test_parse_repo_url.nim"
-  exec "nim c -r tests/test_gitea.nim"
+when fileExists("config.nims"):
+  include "config.nims"
+

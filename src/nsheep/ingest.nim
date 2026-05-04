@@ -5,7 +5,7 @@
 
 import std/[times, tables, strutils, options]
 import chronicles
-import nsheep/[types, storage, vcs, tarstrip], puppy
+import nsheep/[types, storage, vcs, tarstrip, nimblemeta], puppy
 
 proc storeVersionReadme(store: DbStorage, pkgName: string, ver: SemVer, tarballBytes: seq[byte]) =
   let readme = extractReadmeFromTarball(tarballBytes)
@@ -23,37 +23,8 @@ type
 # --- Nimble file parsing ---
 
 proc parseNimbleSimple*(nimbleContent: string): Table[string, string] =
-  ## Fast line-based nimble field extraction. No subprocesses, no regex.
-  ## Handles both `name = "foo"` and `name "foo"` styles.
-  ## Falls back to empty values for complex expressions (multiline, concat, etc).
-  ## Also detects presence of `bin` field (stored as "true" if present).
-  result = initTable[string, string]()
-  const fields = ["name", "version", "author", "description", "license", "srcDir", "backend"]
-  for line in nimbleContent.splitLines():
-    let trimmed = line.strip()
-    # Skip comments and empty lines
-    if trimmed.len == 0 or trimmed.startsWith("#"):
-      continue
-    # Detect bin field presence
-    if trimmed.startsWith("bin") and (trimmed.len == 3 or trimmed[3] in {' ', '\t', '='}):
-      result["hasBin"] = "true"
-      continue
-    for field in fields:
-      if trimmed.startsWith(field):
-        var pos = field.len
-        # Skip whitespace and optional '='
-        while pos < trimmed.len and (trimmed[pos] in {' ', '\t', '='}):
-          pos.inc
-        # Extract quoted string
-        if pos < trimmed.len and trimmed[pos] == '"':
-          pos.inc
-          var value = ""
-          while pos < trimmed.len and trimmed[pos] != '"':
-            value.add(trimmed[pos])
-            pos.inc
-          if value.len > 0:
-            result[field] = value
-        break
+  ## Parse project metadata from a .nimble file using Atlas's compiler-backed parser.
+  parseProjectInfo(nimbleContent)
 
 # --- Core ingestion logic ---
 
