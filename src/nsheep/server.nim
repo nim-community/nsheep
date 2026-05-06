@@ -567,7 +567,7 @@ proc handleDownloadLatest(state: ptr ServerState): RequestHandler =
     var headers = emptyHttpHeaders()
     headers["Content-Type"] = "application/gzip"
     headers["Content-Disposition"] = "attachment; filename=\"" & $nameStr & "-#head.tar.gz\""
-    headers["Cache-Control"] = "public, max-age=31536000, immutable" # 1 year
+    headers["Cache-Control"] = "public, max-age=300" # 5 min cache for head (it changes)
     headers["Access-Control-Allow-Origin"] = "*"
     addSecurityHeaders(headers)
 
