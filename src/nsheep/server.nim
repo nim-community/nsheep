@@ -534,6 +534,45 @@ proc handleDownload(state: ptr ServerState): RequestHandler =
 
     request.respond(200, headers, strData)
 
+proc handleDownloadLatest(state: ptr ServerState): RequestHandler =
+  result = proc(request: Request) =
+    let store = openStore(state)
+    defer: store.close()
+    let nameStr = request.pathParams["name"]
+
+    # Record download as head
+    try:
+      recordDownload(store, nameStr, "#head")
+    except storage.StorageError as e:
+      error "Failed to record download", package = nameStr, version = "#head", error = e.msg
+
+    # Look up head tarball path
+    let tarPath = try:
+      getTarballPath(store, nameStr, initSemVer(0, 0, 0), "head")
+    except storage.NotFoundError:
+      sendError(request, 404, "not_found", "tarball not found: " & nameStr)
+      return
+    except storage.StorageError as e:
+      sendError(request, 500, "storage_error", e.msg)
+      return
+
+    # Read file directly as string (avoid seq[byte] -> string copy)
+    let strData = try:
+      readFile(tarPath)
+    except CatchableError as e:
+      sendError(request, 500, "read_error", "cannot read tarball: " & e.msg)
+      return
+
+    # Serve with appropriate headers
+    var headers = emptyHttpHeaders()
+    headers["Content-Type"] = "application/gzip"
+    headers["Content-Disposition"] = "attachment; filename=\"" & $nameStr & "-#head.tar.gz\""
+    headers["Cache-Control"] = "public, max-age=31536000, immutable" # 1 year
+    headers["Access-Control-Allow-Origin"] = "*"
+    addSecurityHeaders(headers)
+
+    request.respond(200, headers, strData)
+
 # --- Static Files ---
 
 proc serveStaticFile(state: ptr ServerState, fileName: string): RequestHandler =
@@ -644,6 +683,7 @@ proc setupRoutes*(router: var Router, state: ptr ServerState) =
   router.get("/api/v1/stats", handleStats(state))
   router.get("/packages.json.patch", handlePackagesJsonPatch(state))
   router.head("/packages.json.patch", handlePackagesJsonPatch(state))
+  router.get("/download/@name", handleDownloadLatest(state))
   router.get("/download/@name/@version", handleDownload(state))
 
   # Static frontend assets
