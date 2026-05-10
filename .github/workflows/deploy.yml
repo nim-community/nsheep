@@ -18,15 +18,14 @@ jobs:
         with:
           nim-version: '2.2.8'
 
-      - name: Install slim
-        run: nimble install slim -y
-
       - name: Build frontend
         run: |
-          slim install karax -y
+          nimble install karax -y
           nim js -d:release -o:public/app.js frontend/app.nim
           cp frontend/index.html public/
           cp frontend/app.css public/
+          cp frontend/robot.svg public/
+          cp frontend/theme.js public/
           perl -pi -e 's/\?v=GIT_HASH/?v='$(git rev-parse --short HEAD)'/g' public/index.html
 
       - name: Verify SSH secrets exist
@@ -56,10 +55,11 @@ jobs:
           script: |
             cd /opt/nsheep
             git pull
-            nimble install slim -y
             sudo rc-service nsheep stop
             sudo rc-service nsheep-fetcher stop
-            slim build -d:release -d:strip --passC:-march=x86-64
+            nimble build -d:release -d:strip --passC:-march=x86-64
+            sudo chown nsheep:nsheep /opt/nsheep/nsheep
+            sudo chown nsheep:nsheep /opt/nsheep/nsheep-fetcher
             sudo rc-service nsheep start
             sudo rc-service nsheep-fetcher start
             sleep 2
