@@ -215,6 +215,82 @@ free -h
 dmesg | grep -i "killed process"
 ```
 
+### CI Deploy Fails: `sudo: a password is required`
+
+The `nsheep` user needs passwordless sudo for `rc-service` commands. Create `/etc/sudoers.d/nsheep-deploy`:
+
+```bash
+cat > /etc/sudoers.d/nsheep-deploy << 'EOF'
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep start
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep stop
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep restart
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep status
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep-fetcher start
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep-fetcher stop
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep-fetcher restart
+nsheep ALL=(ALL) NOPASSWD: /sbin/rc-service nsheep-fetcher status
+nsheep ALL=(ALL) NOPASSWD: /bin/chown nsheep:nsheep /opt/nsheep/nsheep
+nsheep ALL=(ALL) NOPASSWD: /bin/chown nsheep:nsheep /opt/nsheep/nsheep-fetcher
+EOF
+chmod 440 /etc/sudoers.d/nsheep-deploy
+visudo -c
+```
+
+### Validation Fails: `cannot open file: pkg/xxx`
+
+The validator runs builds inside Docker containers. Two things must be configured:
+
+1. **Docker must have network access** so `nimble install` can download dependencies:
+
+```bash
+# Enable IPv4 forwarding
+echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
+sysctl -p
+
+# Ensure Docker iptables is enabled and bridge is created
+# /etc/docker/daemon.json should NOT contain "iptables": false or "bridge": "none"
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "iptables": true,
+  "ip6tables": false,
+  "storage-driver": "overlay2"
+}
+EOF
+rc-service docker restart
+
+# Verify
+docker run --rm nimlang/nim:alpine ping -c 1 8.8.8.8
+```
+
+2. **The validator installs dependencies automatically** for both binary and library packages. If you see import errors for packages that declare dependencies in their `.nimble` file, ensure the validator code is up to date (it should run `nimble install -d -y` before `nim c` for library packages).
+
+### Build Fails: `undeclared identifier: 'MurmurHash3_x86_32'`
+
+This happens when an old/local `minhash` package shadows the nimble-installed version. Check `nimble.paths`:
+
+```bash
+cd /opt/nsheep
+grep minhash nimble.paths
+# Should point to ~/.nimble/pkgs2/minhash-xxx, NOT /opt/minhash or similar
+```
+
+If there's an old clone at `/opt/minhash` or similar, remove it and regenerate paths:
+
+```bash
+rm -rf /opt/minhash
+rm -f nimble.paths
+nimble setup -y
+```
+
+### Corrupted Nimble Data
+
+If `nimble install` fails with `Error: { expected` in `nimbledata2.json`:
+
+```bash
+rm -f /opt/nsheep/.nimble/nimbledata2.json
+nimble setup -y
+```
+
 ---
 
 ## Maintenance
