@@ -28,6 +28,19 @@ jobs:
           cp frontend/theme.js public/
           perl -pi -e 's/\?v=GIT_HASH/?v='$(git rev-parse --short HEAD)'/g' public/index.html
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and extract binaries from Docker
+        run: |
+          docker build --target builder -t nsheep-builder:latest .
+          id=$(docker create nsheep-builder:latest)
+          mkdir -p dist
+          docker cp $id:/app/nsheep dist/nsheep
+          docker cp $id:/app/nsheep-fetcher dist/nsheep-fetcher
+          docker rm $id
+          chmod +x dist/nsheep dist/nsheep-fetcher
+
       - name: Verify SSH secrets exist
         run: |
           if [ -z "${{ secrets.SSH_HOST }}" ]; then echo "SSH_HOST is empty"; exit 1; fi
@@ -45,7 +58,17 @@ jobs:
           target: "/opt/nsheep/public/"
           strip_components: 1
 
-      - name: Build and restart on VPS
+      - name: Upload binaries
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "dist/nsheep,dist/nsheep-fetcher"
+          target: "/opt/nsheep/"
+          strip_components: 1
+
+      - name: Restart on VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -57,7 +80,6 @@ jobs:
             git pull
             sudo rc-service nsheep stop
             sudo rc-service nsheep-fetcher stop
-            nimble build -d:release -d:strip --passC:-march=x86-64
             sudo chown nsheep:nsheep /opt/nsheep/nsheep
             sudo chown nsheep:nsheep /opt/nsheep/nsheep-fetcher
             sudo rc-service nsheep start

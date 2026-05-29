@@ -1,5 +1,5 @@
 # Build stage
-FROM nimlang/nim:2.2.0-alpine AS builder
+FROM nimlang/nim:2.2.6-alpine-regular AS builder
 
 WORKDIR /app
 
