@@ -105,7 +105,7 @@ proc runDockerBuild(repoUrl, tag, subdir, dockerImage: string, timeout: int): Bu
     let nimBackend = if backend in ["c", "cpp", "js", "objc"]: backend else: "c"
     let srcPath = if srcDirVal.len > 0: srcDirVal & "/" & pkgName & ".nim" else: pkgName & ".nim"
     dockerCmd = dockerBase & "sh -c 'nimble install -d -y && nim " & nimBackend & " --compileOnly -o:/tmp/" & pkgName &
-        " " &srcPath & "' 2>&1"
+        " " & srcPath & "' 2>&1"
     buildDescription = "nimble install + nim " & nimBackend & " --compileOnly " & srcPath
 
   info "Running validation", repo = repoUrl, tag = tag, command = buildDescription
