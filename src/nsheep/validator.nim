@@ -86,7 +86,7 @@ proc runDockerBuild(repoUrl, tag, subdir, dockerImage: string, timeout: int): Bu
   let backend = nimbleData.getOrDefault("backend", "c")
 
   let dockerWorkDir = if subdir.len > 0: "/src/" & subdir else: "/src"
-  let dockerBase = "docker run --rm " &
+  let dockerBase = "docker run --rm --cpus=0.5 " &
     "-v " & srcDir & ":/src:ro " &
     "-w " & dockerWorkDir.quoteShell & " " &
     dockerImage & " "
