@@ -97,16 +97,16 @@ proc runDockerBuild(repoUrl, tag, subdir, dockerImage: string, timeout: int): Bu
   if hasBin:
     # Binary package: build all defined binaries
     # Use --binDir to output to a writable location since /src is mounted ro
-    dockerCmd = dockerBase & "nimble build --binDir:/tmp 2>&1"
-    buildDescription = "nimble build"
+    dockerCmd = dockerBase & "nimble build --compileOnly --binDir:/tmp 2>&1"
+    buildDescription = "nimble build --compileOnly"
   else:
     # Library package: install deps then compile the main module to verify it imports correctly
     # Output to /tmp since /src is mounted read-only
     let nimBackend = if backend in ["c", "cpp", "js", "objc"]: backend else: "c"
     let srcPath = if srcDirVal.len > 0: srcDirVal & "/" & pkgName & ".nim" else: pkgName & ".nim"
-    dockerCmd = dockerBase & "sh -c 'nimble install -d -y && nim " & nimBackend & " -o:/tmp/" & pkgName & " " &
-        srcPath & "' 2>&1"
-    buildDescription = "nimble install + nim " & nimBackend & " " & srcPath
+    dockerCmd = dockerBase & "sh -c 'nimble install -d -y && nim " & nimBackend & " --compileOnly -o:/tmp/" & pkgName &
+        " " &srcPath & "' 2>&1"
+    buildDescription = "nimble install + nim " & nimBackend & " --compileOnly " & srcPath
 
   info "Running validation", repo = repoUrl, tag = tag, command = buildDescription
 
@@ -208,6 +208,10 @@ proc isDockerAvailable*(): bool =
   ## Check if Docker is installed and running
   let (_, exitCode) = execCmdEx("docker ps")
   return exitCode == 0
+
+proc cleanupStaleContainers*() =
+  ## Remove stopped containers to free disk space and prevent resource exhaustion
+  discard execCmdEx("docker container prune -f 2>/dev/null")
 
 proc validateOrSkip*(s: DbStorage, repoUrl, repoName, subdir: string, config: ValidatorConfig): bool =
   ## Validate if enabled and Docker available, otherwise return true (skip)

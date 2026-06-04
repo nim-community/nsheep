@@ -3,7 +3,7 @@
 ## Runs in separate thread, resilient to individual failures
 ##
 
-import std/[json, strutils, options, os]
+import std/[json, strutils, options, os, times]
 import chronicles
 import ./[storage, ingest, vcs, config, validator], puppy
 
@@ -11,6 +11,8 @@ const
   NimblePackagesUrl = "https://raw.githubusercontent.com/nim-lang/packages/master/packages.json"
   DefaultFetchInterval = 60 * 60 # 1 hour in seconds
   MaxRetries = 3
+  MaxConsecutiveErrors = 10
+  ErrorBackoffBase = 5000
 
 type
   IngestResult* = enum
@@ -120,32 +122,55 @@ proc classifyFailure(e: ref Exception): string =
     return "vcs_error"
   return "unknown"
 
-proc ingestPackage(fetcher: ptr FetcherData, pkg: NimblePkg): IngestResult =
-  ## Ingest a single package
+proc hasConsecutiveErrors(errors: var seq[int64], maxErrors: int): bool =
+  let now = getTime().toUnix
+  errors.add(now)
+  var recent = 0
+  for i in countdown(errors.high, max(0, errors.high - maxErrors)):
+    if now - errors[i] <= 120:
+      recent.inc
+    else:
+      break
+  if errors.len > maxErrors * 2:
+    errors = errors[errors.len - maxErrors .. ^1]
+  return recent >= maxErrors
+
+proc ingestPackage(fetcher: ptr FetcherData, pkg: NimblePkg): (IngestResult, bool) =
+  ## Ingest a single package. Returns (result, isTransientError)
+  ## isTransientError is true for network/timeout errors that may self-resolve.
 
   # Skip if processed since last fetcher cycle
   if packageProcessedRecently(fetcher.store, pkg.name, fetcher.fetcherConfig.interval):
     info "Skipping recently processed package", repo = pkg.repo.path
-    return irSkipped
+    return (irSkipped, false)
 
   var lastError = ""
+  var isTransient = false
   for attempt in 1..MaxRetries:
     try:
       discard ingest(fetcher.vcs, fetcher.store, pkg.repo, pkg.name, pkg.tags)
-      return irSuccess
+      return (irSuccess, false)
     except VcsNotFoundError as e:
       warn "Repository not found, giving up", repo = pkg.repo.path, error = e.msg
       recordFailedPackage(fetcher.store, pkg.name, classifyFailure(e), pkg.repo.url)
-      return irFailed
+      return (irFailed, false)
     except CatchableError as e:
       warn "Ingest failed", repo = pkg.repo.path, attempt = attempt, error = e.msg
       lastError = classifyFailure(e)
+      isTransient = lastError in ["network_error", "server_error"]
       if attempt < MaxRetries:
         sleep(1000 * attempt)
 
   error "Ingest failed permanently", repo = pkg.repo.path
   recordFailedPackage(fetcher.store, pkg.name, lastError, pkg.repo.url)
-  return irFailed
+  return (irFailed, isTransient)
+
+proc skipCycleOnPersistentErrors*(errors: var seq[int64]): bool =
+  if hasConsecutiveErrors(errors, MaxConsecutiveErrors):
+    warn "Too many consecutive errors, backing off", backoffSeconds = ErrorBackoffBase div 1000
+    sleep(ErrorBackoffBase)
+    return true
+  return false
 
 proc shouldFetch(fetcher: ptr FetcherData, pkg: NimblePkg): bool =
   if fetcher.fetcherConfig.filterPatterns.len == 0:
@@ -165,6 +190,7 @@ proc runOnce(fetcher: ptr FetcherData) =
   var failCount = 0
   var skipCount = 0
   var processedCount = 0
+  var errorTimestamps: seq[int64]
 
   for pkg in pkgs:
     if fetcher.fetcherConfig.maxPackages > 0 and processedCount >= fetcher.fetcherConfig.maxPackages:
@@ -175,13 +201,19 @@ proc runOnce(fetcher: ptr FetcherData) =
 
     processedCount.inc
 
-    case ingestPackage(fetcher, pkg):
+    let (status, isTransient) = ingestPackage(fetcher, pkg)
+    case status:
     of irSuccess: successCount.inc
-    of irFailed: failCount.inc
+    of irFailed:
+      failCount.inc
+      if isTransient and skipCycleOnPersistentErrors(errorTimestamps):
+        info "Backing off due to persistent transient errors", failed = failCount, processed = processedCount
+        break
     of irSkipped: skipCount.inc
 
   info "Fetch cycle complete", success = successCount, failed = failCount, skipped = skipCount,
       total = processedCount
+  walCheckpoint(fetcher.store)
 
 proc fetcherLoop(fetcher: ptr FetcherData) {.thread.} =
   info "Fetcher thread started", interval = fetcher.fetcherConfig.interval
@@ -258,6 +290,7 @@ proc validatorLoop(v: ptr ValidatorData) {.thread.} =
         continue
 
       try:
+        cleanupStaleContainers()
         let pkgs = fetchNimblePackages()
         for pkg in pkgs:
           if not v.running:
@@ -266,6 +299,11 @@ proc validatorLoop(v: ptr ValidatorData) {.thread.} =
             continue
           if validationDoneRecently(v.store, pkg.name, v.interval):
             continue
+
+          if not isDockerAvailable():
+            warn "Docker became unavailable mid-cycle, pausing validation until next cycle"
+            break
+
           info "Validating package", repo = pkg.repo.path
           let result = validatePackage(v.store, pkg.repo.url, pkg.name, pkg.repo.subdir, v.config)
           if result.overallSuccess:

@@ -130,6 +130,9 @@ proc initStorage*(dbPath: string, tarballDir: string): DbStorage =
   result.db.exec("PRAGMA busy_timeout = 10000")
   result.db.exec("PRAGMA journal_mode = WAL")
 
+  # Keep WAL file small: auto-checkpoint every 100 pages (400KB)
+  result.db.exec("PRAGMA wal_autocheckpoint = 100")
+
   # Create tables
   result.db.execScript(Schema)
 
@@ -163,6 +166,14 @@ proc openStorage*(dbPath: string, tarballDir: string): DbStorage =
 proc close*(s: DbStorage) =
   ## Close database connection
   s.db.close()
+
+proc walCheckpoint*(s: DbStorage) =
+  ## Force WAL checkpoint to keep the WAL file small.
+  ## Only works when there are no active concurrent readers.
+  try:
+    s.db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
+  except CatchableError:
+    discard
 
 # --- Package Operations ---
 
