@@ -61,6 +61,76 @@ cp cfg.example.yaml cfg.yaml
 
 Or use Docker Compose to run both:
 
+```bash
+docker compose up -d
+```
+
+## Deployment
+
+### VPS Requirements
+
+- **OS**: Alpine 3.23+ or Ubuntu 22.04/24.04
+- **RAM**: 2GB+ (Docker builds consume memory; previous OOM issues at ~939MB)
+- **Disk**: 20GB+ (SQLite database + tarballs grow over time)
+- **Docker**: Required for package build validation
+
+### Docker Configuration
+
+Enable IPv4 forwarding for container network access (needed for `nimble install` during validation):
+
+```bash
+echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf && sysctl -p
+```
+
+`/etc/docker/daemon.json`:
+
+```json
+{
+  "iptables": true,
+  "ip6tables": false,
+  "storage-driver": "overlay2"
+}
+```
+
+### Production Architecture
+
+```
+Cloudflare CDN → Nginx (SSL) → nsheep (:8080)
+                               nsheep-fetcher (background)
+```
+
+- **Nginx**: SSL termination, static asset caching, reverse proxy
+- **nsheep**: HTTP server serving package metadata and tarballs
+- **nsheep-fetcher**: Background ingestion with Docker-based build validation
+
+### Config
+
+```yaml
+server:
+  bindAddr: "127.0.0.1"
+  port: 8080
+
+github:
+  token: ""  # Optional: GitHub API token for higher rate limits
+
+fetcher:
+  interval: 28800  # 8 hours between cycles
+
+validator:
+  enabled: true
+  dockerImage: "nimlang/nim:alpine"
+  timeout: 300     # 5 minutes per build
+  required: false  # Don't reject packages on build failure
+
+local:
+  dbPath: "./data/nsheep.db"
+  tarballDir: "./data/tarballs"
+
+storage: local
+```
+
+See [DEPLOY.md](DEPLOY.md) for full deployment instructions (nginx setup, OpenRC/systemd services, CI/CD, Cloudflare DNS).
+
 ## Configuration
 
 ```yaml
